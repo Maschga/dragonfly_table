@@ -77,6 +77,19 @@
         background: #fafafa;
       }
 
+      .weight-col {
+        background: #f4f8ff;
+      }
+
+      .weight-input {
+        width: 8ch;
+        text-align: right;
+      }
+
+      .goal-col {
+        border-right: 3px solid #999;
+      }
+
       .performance-cell {
         min-width: 92px;
         font-weight: 600;
@@ -100,6 +113,15 @@
         background: #f3f3f3;
         color: #666;
       }
+
+      .weekly-summary {
+        margin-top: 8px;
+      }
+
+      .weekly-summary td,
+      .weekly-summary th {
+        padding: 4px 8px;
+      }
     </style>
   </head>
   <body>
@@ -116,12 +138,12 @@
     <div>
       <label for="weekSelect">Week:</label>
       <select id="weekSelect"></select>
-      <input
+      <!-- <input
         id="customWeekName"
         type="text"
         placeholder="Week 06.04.26 - 13.04.26"
-      />
-      <button id="createCustomWeekBtn" type="button">Create custom week</button>
+      /> -->
+      <!-- <button id="createCustomWeekBtn" type="button">Create custom week</button> -->
       <button id="createWeekBtn" type="button">Create current week</button>
       <button id="backupBtn" type="button">Export backup JSON</button>
     </div>
@@ -146,22 +168,9 @@
         "saturday",
         "sunday",
       ];
-      const exercises = ["ex1", "ex2", "ex3"];
-      const dayLabels = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-      ];
-      const performanceColumns = [
-        "Sum",
-        "Percentage of goal",
-        "Mean",
-        "Std Dev",
-      ];
+      const exercises = ["Push-up", "Pull-up", "Crunch", "Custom1", "Custom2"];
+      const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const performanceColumns = ["Sum", "%", "Weighted", "Mean", "SD"];
 
       const usernameInput = document.getElementById("username");
       const passwordInput = document.getElementById("password");
@@ -347,12 +356,25 @@
 
         exercises.forEach((exercise) => {
           const sourceGoal = workbook.db[fromWeek]?.[exercise]?.goal;
-          if (sourceGoal === undefined || sourceGoal === "") return;
+          const sourceWeight = workbook.db[fromWeek]?.[exercise]?.weight;
 
           if (!workbook.db[toWeek][exercise])
             workbook.db[toWeek][exercise] = {};
-          if (workbook.db[toWeek][exercise].goal === undefined) {
+
+          if (
+            sourceGoal !== undefined &&
+            sourceGoal !== "" &&
+            workbook.db[toWeek][exercise].goal === undefined
+          ) {
             workbook.db[toWeek][exercise].goal = sourceGoal;
+          }
+
+          if (
+            sourceWeight !== undefined &&
+            sourceWeight !== "" &&
+            workbook.db[toWeek][exercise].weight === undefined
+          ) {
+            workbook.db[toWeek][exercise].weight = sourceWeight;
           }
         });
       }
@@ -409,12 +431,49 @@
           : null;
         const stdDev = variance === null ? null : Math.sqrt(variance);
         const goalRaw = workbook.db?.[currentWeek]?.[exercise]?.goal;
+        const weightRaw = workbook.db?.[currentWeek]?.[exercise]?.weight;
         const goal =
           goalRaw === "" || goalRaw === undefined ? null : Number(goalRaw);
+        const weight =
+          weightRaw === "" || weightRaw === undefined
+            ? null
+            : Number(weightRaw);
         const hasGoal = Number.isFinite(goal) && goal > 0;
+        const hasWeight = Number.isFinite(weight);
         const percentage = hasGoal ? (sum / goal) * 100 : null;
+        const weighted = hasWeight ? sum * weight : null;
+        const weightedGoal = hasGoal && hasWeight ? goal * weight : null;
 
-        return { sum, hasGoal, percentage, mean, stdDev };
+        return {
+          sum,
+          hasGoal,
+          percentage,
+          mean,
+          stdDev,
+          hasWeight,
+          weighted,
+          weightedGoal,
+        };
+      }
+
+      function getWeeklyWeightedSummary(workbook) {
+        const statsByExercise = exercises.map((exercise) =>
+          getExerciseStats(workbook, exercise),
+        );
+        const weightedGoalTotal = statsByExercise.reduce(
+          (total, stats) => total + (stats.weightedGoal ?? 0),
+          0,
+        );
+        const weightedTotal = statsByExercise.reduce(
+          (total, stats) => total + (stats.weighted ?? 0),
+          0,
+        );
+        const weightedPercentage =
+          weightedGoalTotal > 0
+            ? (weightedTotal / weightedGoalTotal) * 100
+            : null;
+
+        return { weightedGoalTotal, weightedTotal, weightedPercentage };
       }
 
       function percentageBackground(percentage) {
@@ -440,18 +499,26 @@
         }
 
         if (index === 2) {
-          if (stats.mean === null) {
+          if (!stats.hasWeight) {
             return `<td class="performance-cell performance-neutral" data-performance-index="2">—</td>`;
           }
 
-          return `<td class="performance-cell" data-performance-index="2">${stats.mean.toFixed(2)}</td>`;
+          return `<td class="performance-cell" data-performance-index="2">${stats.weighted.toFixed(2)}</td>`;
+        }
+
+        if (index === 3) {
+          if (stats.mean === null) {
+            return `<td class="performance-cell performance-neutral" data-performance-index="3">—</td>`;
+          }
+
+          return `<td class="performance-cell" data-performance-index="3">${stats.mean.toFixed(2)}</td>`;
         }
 
         if (stats.stdDev === null) {
-          return `<td class="performance-cell performance-neutral" data-performance-index="3">—</td>`;
+          return `<td class="performance-cell performance-neutral" data-performance-index="4">—</td>`;
         }
 
-        return `<td class="performance-cell" data-performance-index="3">${stats.stdDev.toFixed(2)}</td>`;
+        return `<td class="performance-cell" data-performance-index="4">${stats.stdDev.toFixed(2)}</td>`;
       }
 
       function applyPerformanceCell(cell, index, stats) {
@@ -478,6 +545,17 @@
         }
 
         if (index === 2) {
+          if (!stats.hasWeight) {
+            cell.textContent = "—";
+            cell.classList.add("performance-neutral");
+            return;
+          }
+
+          cell.textContent = stats.weighted.toFixed(2);
+          return;
+        }
+
+        if (index === 3) {
           if (stats.mean === null) {
             cell.textContent = "—";
             cell.classList.add("performance-neutral");
@@ -504,6 +582,10 @@
             const performanceCells = performanceColumns
               .map((_, index) => renderPerformanceCell(index, stats))
               .join("");
+            const weightValue =
+              workbook.db?.[currentWeek]?.[exercise]?.weight ?? "";
+            const weightDisabled = workbook.editable ? "" : "disabled";
+            const weightCell = `<td class="weight-col"><input class="weight-input" type="text" inputmode="decimal" name="${exercise}_weight" value="${weightValue}" ${weightDisabled} /></td>`;
             const goalValue =
               workbook.db?.[currentWeek]?.[exercise]?.goal ?? "";
             const goalDisabled = workbook.editable ? "" : "disabled";
@@ -516,19 +598,42 @@
                 return `<td><input type="number" name="${exercise}_${day}" value="${value}" ${disabled} /></td>`;
               })
               .join("");
-            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${goalCell}${cells}${performanceCells}</tr>`;
+            return `<tr data-exercise="${exercise}"><td>${exercise}</td>${weightCell}${goalCell}${cells}${performanceCells}</tr>`;
           })
           .join("");
+
+        const weeklySummary = getWeeklyWeightedSummary(workbook);
+        const weightedPercentLabel =
+          weeklySummary.weightedPercentage === null
+            ? "—"
+            : `${Math.round(Math.max(0, weeklySummary.weightedPercentage))}%`;
+        const weightedPercentStyle =
+          weeklySummary.weightedPercentage === null
+            ? ""
+            : `style="background:${percentageBackground(weeklySummary.weightedPercentage)}"`;
 
         return `
           <table>
             <tr>
               <th>Exercise</th>
+              <th class="weight-col">Weight</th>
               <th class="goal-col">Goal</th>
               ${dayLabels.map((label) => `<th>${label}</th>`).join("")}
               ${performanceColumns.map((label) => `<th>${label}</th>`).join("")}
             </tr>
             ${rows}
+          </table>
+          <table class="weekly-summary">
+            <tr>
+              <th>Weighted Goal</th>
+              <th>Weighted Sum</th>
+              <th>Weighted %</th>
+            </tr>
+            <tr>
+              <td>${weeklySummary.weightedGoalTotal.toFixed(2)}</td>
+              <td>${weeklySummary.weightedTotal.toFixed(2)}</td>
+              <td class="performance-cell performance-percent" ${weightedPercentStyle}>${weightedPercentLabel}</td>
+            </tr>
           </table>
         `;
       }
@@ -552,6 +657,26 @@
         workbook.db[currentWeek][exercise][day] = value;
       }
 
+      function parseWeightValue(rawValue) {
+        const text = String(rawValue ?? "").trim();
+        if (text === "") return "";
+
+        const ratio = text.match(
+          /^([-+]?\d+(?:\.\d+)?)\s*\/\s*([-+]?\d+(?:\.\d+)?)$/,
+        );
+        if (ratio) {
+          const numerator = Number(ratio[1]);
+          const denominator = Number(ratio[2]);
+          if (!Number.isFinite(numerator) || !Number.isFinite(denominator))
+            return null;
+          if (denominator === 0) return null;
+          return numerator / denominator;
+        }
+
+        const numeric = Number(text);
+        return Number.isFinite(numeric) ? numeric : null;
+      }
+
       function render() {
         syncWeekSelect();
         tablesRoot.innerHTML = "";
@@ -570,21 +695,27 @@
             `;
 
             if (workbook.editable) {
-              section
-                .querySelectorAll("input[type='number']")
-                .forEach((inputEl) => {
-                  inputEl.addEventListener("input", () => {
-                    const row = inputEl.closest("tr");
-                    const [exercise, day] = inputEl.name.split("_");
-                    const value =
-                      inputEl.value === "" ? "" : Number(inputEl.value);
-                    setCell(workbook, exercise, day, value);
-                    if (row) refreshPerformanceCells(row, workbook, exercise);
-                    saveWorkbook().catch((error) =>
-                      setMessage(error.message || "Save failed"),
-                    );
-                  });
+              section.querySelectorAll("input").forEach((inputEl) => {
+                inputEl.addEventListener("input", () => {
+                  const row = inputEl.closest("tr");
+                  const [exercise, day] = inputEl.name.split("_");
+                  let value;
+                  if (day === "weight") {
+                    value = parseWeightValue(inputEl.value);
+                    if (value === null) {
+                      setMessage("Weight must be a number or ratio like 1/6.");
+                      return;
+                    }
+                  } else {
+                    value = inputEl.value === "" ? "" : Number(inputEl.value);
+                  }
+                  setCell(workbook, exercise, day, value);
+                  if (row) refreshPerformanceCells(row, workbook, exercise);
+                  saveWorkbook().catch((error) =>
+                    setMessage(error.message || "Save failed"),
+                  );
                 });
+              });
             }
 
             tablesRoot.appendChild(section);
@@ -769,11 +900,13 @@
         );
       });
 
-      createCustomWeekBtn.addEventListener("click", () => {
-        createWeek(customWeekName.value).catch((error) =>
-          setMessage(error.message),
-        );
-      });
+      if (createCustomWeekBtn && customWeekName) {
+        createCustomWeekBtn.addEventListener("click", () => {
+          createWeek(customWeekName.value).catch((error) =>
+            setMessage(error.message),
+          );
+        });
+      }
 
       backupBtn.addEventListener("click", () => {
         exportBackup();

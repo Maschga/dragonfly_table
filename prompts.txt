@@ -1,4 +1,5 @@
-Add another editable column before monday where one cans set the individual goal. Obviously doesn't count towards the getRow values and visually separated.
-A new week inherits the last week's goals for all users.
+Highlight goal with yellowish and sum with purplish the way you highlighted weight with bluish.
+Remember that one's own table should be shown above the other user's tables
+Maybe the columns dont all need to be quite as wide
 
-As for week management: maybe call the week by their dates (e.g "Week 06.04.26 - 13.04.26" and create a new one automatically every monday)
+Add left/right arrow buttons to switch weeks
