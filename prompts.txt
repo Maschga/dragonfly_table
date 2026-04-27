@@ -1,0 +1,4 @@
+Add another editable column before monday where one cans set the individual goal. Obviously doesn't count towards the getRow values and visually separated.
+A new week inherits the last week's goals for all users.
+
+As for week management: maybe call the week by their dates (e.g "Week 06.04.26 - 13.04.26" and create a new one automatically every monday)

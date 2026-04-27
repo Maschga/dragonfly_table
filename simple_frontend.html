@@ -3,17 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Multi User Tables</title>
+    <title>Dragonfly Tables</title>
     <style>
       body {
         font-family: Arial, sans-serif;
         margin: 16px;
-        line-height: 1.4;
       }
 
       h1 {
         margin: 0 0 12px;
-        font-size: 1.4rem;
       }
 
       table,
@@ -29,40 +27,25 @@
         text-align: center;
       }
 
-      label,
-      select,
       input,
-      button {
+      button,
+      select {
         font: inherit;
-      }
-
-      label {
-        margin-right: 6px;
-      }
-
-      select,
-      input,
-      button {
         margin: 0 8px 8px 0;
         padding: 4px 8px;
         border: 1px solid #ccc;
-        border-radius: 4px;
         background: #fff;
       }
 
-      button {
-        cursor: pointer;
-      }
-
       input[type="number"] {
-        width: 5.5ch;
+        width: 6ch;
         text-align: right;
         -moz-appearance: textfield;
         appearance: textfield;
       }
 
-      input[type="number"]::-webkit-outer-spin-button,
-      input[type="number"]::-webkit-inner-spin-button {
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
         -webkit-appearance: none;
         margin: 0;
       }
@@ -86,19 +69,30 @@
   </head>
   <body>
     <h1>Input Tables</h1>
-    <label for="weekSelect">Week:</label>
-    <select id="weekSelect"></select>
-    <label for="newWeekName">New week:</label>
-    <input id="newWeekName" type="text" placeholder="e.g. week2" />
-    <button id="createWeekBtn" type="button">Create week</button>
+
+    <div>
+      <input id="username" type="text" placeholder="Username" />
+      <input id="password" type="password" placeholder="Password" />
+      <button id="loginBtn" type="button">Login</button>
+      <button id="registerBtn" type="button">Register</button>
+      <span id="message"></span>
+    </div>
+
+    <div>
+      <label for="weekSelect">Week:</label>
+      <select id="weekSelect"></select>
+      <input id="newWeekName" type="text" placeholder="week2" />
+      <button id="createWeekBtn" type="button">Create week</button>
+    </div>
+
     <div id="tablesRoot"></div>
 
     <script>
-      const tablesRoot = document.getElementById("tablesRoot");
-      const weekSelect = document.getElementById("weekSelect");
-      const newWeekName = document.getElementById("newWeekName");
-      const createWeekBtn = document.getElementById("createWeekBtn");
-      const currentUser = "kf";
+      const API_BASE = window.location.origin.startsWith("http")
+        ? window.location.origin
+        : "http://127.0.0.1:8090";
+      const AUTH_KEY = "dragonfly_pb_auth";
+
       const days = [
         "monday",
         "tuesday",
@@ -140,121 +134,126 @@
         },
       ];
 
-      let data = { db: {} };
-      let users = [];
+      const usernameInput = document.getElementById("username");
+      const passwordInput = document.getElementById("password");
+      const loginBtn = document.getElementById("loginBtn");
+      const registerBtn = document.getElementById("registerBtn");
+      const weekSelect = document.getElementById("weekSelect");
+      const newWeekName = document.getElementById("newWeekName");
+      const createWeekBtn = document.getElementById("createWeekBtn");
+      const messageEl = document.getElementById("message");
+      const tablesRoot = document.getElementById("tablesRoot");
+
+      let auth = loadAuth();
+      let workbooks = [];
       let currentWeek = "week1";
 
-      function escapeHtml(value) {
-        return String(value).replace(
-          /[&<>"]|'/g,
-          (char) =>
-            ({
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            })[char],
+      function loadAuth() {
+        try {
+          const raw = localStorage.getItem(AUTH_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function saveAuth() {
+        if (auth) localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+      }
+
+      function setMessage(text) {
+        messageEl.textContent = text;
+      }
+
+      function api(path, options = {}) {
+        const headers = {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        };
+        if (auth?.token) headers.Authorization = `Bearer ${auth.token}`;
+        return fetch(`${API_BASE}${path}`, { ...options, headers });
+      }
+
+      function currentUserId() {
+        return auth?.record?.id || null;
+      }
+
+      function currentUsername() {
+        return auth?.record?.username || "guest";
+      }
+
+      function workbookForCurrentUser() {
+        const userId = currentUserId();
+        if (!userId) return null;
+
+        let workbook = workbooks.find((item) => item.userId === userId);
+        if (!workbook) {
+          workbook = {
+            id: null,
+            userId,
+            label: currentUsername(),
+            db: {},
+            editable: true,
+          };
+          workbooks.unshift(workbook);
+        }
+
+        workbook.editable = true;
+        workbook.label = currentUsername();
+        return workbook;
+      }
+
+      function allWeeks() {
+        const weeks = new Set();
+        workbooks.forEach((workbook) =>
+          Object.keys(workbook.db || {}).forEach((weekName) =>
+            weeks.add(weekName),
+          ),
         );
+        return Array.from(weeks);
       }
 
-      function rebuildUsers() {
-        users = Object.keys(data.db).map((userId) => ({
-          id: userId,
-          label: userId,
-          editable: userId === currentUser,
-        }));
-      }
+      function syncWeekSelect() {
+        const weeks = allWeeks();
+        if (weeks.length && !weeks.includes(currentWeek))
+          currentWeek = weeks[0];
+        if (!weeks.length) currentWeek = currentWeek || "week1";
 
-      function rebuildWeeks() {
-        const weekSet = new Set();
-
-        Object.values(data.db).forEach((userData) => {
-          Object.keys(userData || {}).forEach((weekKey) =>
-            weekSet.add(weekKey),
-          );
-        });
-
-        const weeks = Array.from(weekSet);
-        if (!weeks.includes(currentWeek)) {
-          currentWeek = weeks[0] || "week1";
-        }
-
-        weekSelect.innerHTML = weeks
-          .map((weekKey) => {
-            const selected = weekKey === currentWeek ? "selected" : "";
-            return `<option value="${weekKey}" ${selected}>${weekKey}</option>`;
-          })
+        weekSelect.innerHTML = (weeks.length ? weeks : ["week1"])
+          .map(
+            (weekName) =>
+              `<option value="${weekName}" ${weekName === currentWeek ? "selected" : ""}>${weekName}</option>`,
+          )
           .join("");
-
-        if (!weeks.length) {
-          weekSelect.innerHTML = '<option value="week1">week1</option>';
-          weekSelect.value = "week1";
-          currentWeek = "week1";
-        }
+        weekSelect.value = currentWeek;
       }
 
-      function createWeek(weekName) {
-        const trimmedName = weekName.trim();
-        if (!trimmedName) return;
-
-        Object.keys(data.db).forEach((userId) => {
-          if (!data.db[userId][trimmedName]) {
-            data.db[userId][trimmedName] = {};
-          }
-        });
-
-        currentWeek = trimmedName;
-        init();
-        weekSelect.value = trimmedName;
-        newWeekName.value = "";
-      }
-
-      function ensurePath(userId, exercise) {
-        if (!data.db[userId]) data.db[userId] = {};
-        if (!data.db[userId][currentWeek]) data.db[userId][currentWeek] = {};
-        if (!data.db[userId][currentWeek][exercise])
-          data.db[userId][currentWeek][exercise] = {};
-      }
-
-      function updateCell(userId, exercise, day, value) {
-        ensurePath(userId, exercise);
-        data.db[userId][currentWeek][exercise][day] = value;
-      }
-
-      function loadWeek1Value(userId, exercise, day) {
-        return data.db[userId]?.[currentWeek]?.[exercise]?.[day] ?? "";
-      }
-
-      function rowValues(userId, exercise) {
+      function rowValues(workbook, exercise) {
         return days
-          .map((day) => loadWeek1Value(userId, exercise, day))
+          .map((day) => workbook.db?.[currentWeek]?.[exercise]?.[day])
           .filter((value) => value !== "" && !Number.isNaN(Number(value)))
-          .map((value) => Number(value));
+          .map(Number);
       }
 
-      function buildTable(user) {
+      function buildTable(workbook) {
         const rows = exercises
           .map((exercise) => {
-            const values = rowValues(user.id, exercise);
-            const formulaCells = formulaColumns
+            const values = rowValues(workbook, exercise);
+            const formulas = formulaColumns
               .map(
                 (formula, index) =>
                   `<td class="formula-cell" data-formula-index="${index}">${formula.compute(values)}</td>`,
               )
               .join("");
-
             const cells = days
               .map((day) => {
-                const value = escapeHtml(
-                  loadWeek1Value(user.id, exercise, day),
-                );
-                const disabled = user.editable ? "" : "disabled";
+                const value =
+                  workbook.db?.[currentWeek]?.[exercise]?.[day] ?? "";
+                const disabled = workbook.editable ? "" : "disabled";
                 return `<td><input type="number" name="${exercise}_${day}" value="${value}" ${disabled} /></td>`;
               })
               .join("");
-
-            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${cells}${formulaCells}</tr>`;
+            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${cells}${formulas}</tr>`;
           })
           .join("");
 
@@ -270,67 +269,241 @@
         `;
       }
 
-      function buildUserSection(user) {
-        const section = document.createElement("section");
-        section.className = user.editable ? "" : "readonly";
-        section.innerHTML = `
-          <div>${user.label}</div>
-          <div class="table-wrap">${buildTable(user)}</div>
-        `;
-
-        if (user.id === currentUser) {
-          section
-            .querySelectorAll("input[type='number']")
-            .forEach((inputEl) => {
-              inputEl.addEventListener("input", () => {
-                const row = inputEl.closest("tr");
-                const [exercise, day] = inputEl.name.split("_");
-                const value = inputEl.value === "" ? "" : Number(inputEl.value);
-                updateCell(currentUser, exercise, day, value);
-                if (row) {
-                  const values = rowValues(currentUser, exercise);
-                  row.querySelectorAll(".formula-cell").forEach((cell) => {
-                    const formulaIndex = Number(cell.dataset.formulaIndex);
-                    cell.textContent =
-                      formulaColumns[formulaIndex].compute(values);
-                  });
-                }
-              });
-            });
-        }
-
-        tablesRoot.appendChild(section);
+      function refreshFormulaCells(row, workbook, exercise) {
+        const values = rowValues(workbook, exercise);
+        row.querySelectorAll(".formula-cell").forEach((cell) => {
+          const index = Number(cell.dataset.formulaIndex);
+          cell.textContent = formulaColumns[index].compute(values);
+        });
       }
 
-      function init() {
+      function ensureCellPath(workbook, exercise) {
+        if (!workbook.db[currentWeek]) workbook.db[currentWeek] = {};
+        if (!workbook.db[currentWeek][exercise])
+          workbook.db[currentWeek][exercise] = {};
+      }
+
+      function setCell(workbook, exercise, day, value) {
+        ensureCellPath(workbook, exercise);
+        workbook.db[currentWeek][exercise][day] = value;
+      }
+
+      function render() {
+        syncWeekSelect();
         tablesRoot.innerHTML = "";
-        rebuildUsers();
-        rebuildWeeks();
-        for (const user of users) {
-          buildUserSection(user);
-        }
+
+        workbooks
+          .map((workbook) => ({
+            ...workbook,
+            editable: workbook.userId === currentUserId(),
+          }))
+          .forEach((workbook) => {
+            const section = document.createElement("section");
+            section.className = workbook.editable ? "" : "readonly";
+            section.innerHTML = `
+              <div>${workbook.label}${workbook.editable ? " (you)" : ""}</div>
+              <div class="table-wrap">${buildTable(workbook)}</div>
+            `;
+
+            if (workbook.editable) {
+              section
+                .querySelectorAll("input[type='number']")
+                .forEach((inputEl) => {
+                  inputEl.addEventListener("input", () => {
+                    const row = inputEl.closest("tr");
+                    const [exercise, day] = inputEl.name.split("_");
+                    const value =
+                      inputEl.value === "" ? "" : Number(inputEl.value);
+                    setCell(workbook, exercise, day, value);
+                    if (row) refreshFormulaCells(row, workbook, exercise);
+                    saveWorkbook().catch((error) =>
+                      setMessage(error.message || "Save failed"),
+                    );
+                  });
+                });
+            }
+
+            tablesRoot.appendChild(section);
+          });
       }
+
+      function createWeek(weekName) {
+        const name = weekName.trim();
+        if (!name) return;
+
+        const workbook = workbookForCurrentUser();
+        if (!workbook) {
+          setMessage("Log in first.");
+          return;
+        }
+
+        if (!workbook.db[name]) workbook.db[name] = {};
+        currentWeek = name;
+        newWeekName.value = "";
+        render();
+        saveWorkbook().catch((error) =>
+          setMessage(error.message || "Save failed"),
+        );
+      }
+
+      async function loadWorkbooks() {
+        const response = await api(
+          "/api/collections/workbooks/records?perPage=200&skipTotal=1&expand=user",
+        );
+        const result = await response.json();
+        if (!response.ok)
+          throw new Error(result.message || "Could not load workbooks");
+
+        workbooks = (result.items || []).map((record) => ({
+          id: record.id,
+          userId: record.user,
+          label: record.expand?.user?.username || record.user,
+          db: record.db || {},
+          editable: false,
+        }));
+
+        workbookForCurrentUser();
+        currentWeek = allWeeks()[0] || "week1";
+        render();
+      }
+
+      async function saveWorkbook() {
+        const workbook = workbookForCurrentUser();
+        if (!workbook) return;
+
+        const path = workbook.id
+          ? `/api/collections/workbooks/records/${workbook.id}`
+          : "/api/collections/workbooks/records";
+
+        const response = await api(path, {
+          method: workbook.id ? "PATCH" : "POST",
+          body: JSON.stringify({ user: currentUserId(), db: workbook.db }),
+        });
+        const result = await response.json();
+
+        if (!response.ok)
+          throw new Error(result.message || "Could not save workbook");
+        if (!workbook.id) workbook.id = result.id;
+      }
+
+      function escapeFilterValue(value) {
+        return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+      }
+
+      function emailFromUsername(username) {
+        const safe = encodeURIComponent(username).replaceAll("%", "");
+        return `u${safe}@local.invalid`;
+      }
+
+      function extractUsernameTakenError(result) {
+        const usernameError = result?.data?.username;
+        if (!Array.isArray(usernameError) || !usernameError.length) return null;
+        const isTaken = usernameError.some(
+          (item) => item?.code === "validation_not_unique",
+        );
+        return isTaken ? "Username already taken." : null;
+      }
+
+      async function isUsernameTaken(username) {
+        const filter = encodeURIComponent(
+          `username="${escapeFilterValue(username)}"`,
+        );
+        const response = await api(
+          `/api/collections/users/records?filter=${filter}&perPage=1&skipTotal=1`,
+        );
+        if (!response.ok) return false;
+        const result = await response.json();
+        return (result.items || []).length > 0;
+      }
+
+      async function login(identityArg, passwordArg) {
+        const identity = (identityArg ?? usernameInput.value).trim();
+        const password = (passwordArg ?? passwordInput.value).trim();
+        if (!identity || !password) return;
+
+        const response = await api(
+          "/api/collections/users/auth-with-password",
+          {
+            method: "POST",
+            body: JSON.stringify({ identity, password }),
+          },
+        );
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || "Login failed");
+
+        auth = result;
+        saveAuth();
+        setMessage(`Logged in as ${auth.record.username}`);
+        await loadWorkbooks();
+      }
+
+      async function register() {
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value.trim();
+        if (!username || !password) {
+          setMessage("Enter username and password.");
+          return;
+        }
+
+        if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+          setMessage(
+            "Username must be 3-32 chars: letters, numbers, dot, dash, underscore.",
+          );
+          return;
+        }
+
+        const taken = await isUsernameTaken(username);
+        if (taken) {
+          setMessage("Username already taken.");
+          return;
+        }
+
+        const response = await api("/api/collections/users/records", {
+          method: "POST",
+          body: JSON.stringify({
+            username,
+            email: emailFromUsername(username),
+            password,
+            passwordConfirm: password,
+          }),
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          const takenMessage = extractUsernameTakenError(result);
+          throw new Error(
+            takenMessage || result.message || "Registration failed",
+          );
+        }
+
+        await login(username, password);
+      }
+
+      loginBtn.addEventListener("click", () => {
+        login().catch((error) => setMessage(error.message));
+      });
+
+      registerBtn.addEventListener("click", () => {
+        register().catch((error) => setMessage(error.message));
+      });
 
       weekSelect.addEventListener("change", () => {
         currentWeek = weekSelect.value;
-        init();
+        render();
       });
 
-      createWeekBtn.addEventListener("click", () => {
-        createWeek(newWeekName.value);
-      });
+      createWeekBtn.addEventListener("click", () =>
+        createWeek(newWeekName.value),
+      );
 
-      async function loadJson() {
-        try {
-          const response = await fetch("./data/user.json");
-          if (!response.ok) throw new Error("fetch failed");
-          data = await response.json();
-          if (!data.db || typeof data.db !== "object") data = { db: {} };
-          init();
-        } catch {}
+      if (auth?.record?.username) {
+        setMessage(`Logged in as ${auth.record.username}`);
       }
 
-      loadJson();
+      loadWorkbooks().catch(() => {
+        setMessage("Log in to load PocketBase data.");
+        render();
+      });
     </script>
   </body>
 </html>
