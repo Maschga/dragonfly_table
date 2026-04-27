@@ -7,7 +7,13 @@
     <style>
       body {
         font-family: Arial, sans-serif;
-        margin: 20px;
+        margin: 16px;
+        line-height: 1.4;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 1.4rem;
       }
 
       table,
@@ -19,20 +25,62 @@
 
       th,
       td {
-        padding: 8px;
+        padding: 6px 8px;
         text-align: center;
       }
 
+      label,
+      select,
+      input,
+      button {
+        font: inherit;
+      }
+
+      label {
+        margin-right: 6px;
+      }
+
+      select,
+      input,
+      button {
+        margin: 0 8px 8px 0;
+        padding: 4px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
       input[type="number"] {
-        width: 70px;
+        width: 5.5ch;
+        text-align: right;
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+
+      input[type="number"]::-webkit-outer-spin-button,
+      input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      #tablesRoot {
+        margin-top: 12px;
       }
 
       section {
-        margin-top: 20px;
+        margin-top: 18px;
       }
 
       .readonly {
         opacity: 0.75;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
       }
     </style>
   </head>
@@ -41,11 +89,15 @@
     <label for="weekSelect">Week:</label>
     <select id="weekSelect"></select>
     <label for="newWeekName">New week:</label>
-    <input id="newWeekName" type="text" placeholder="week2" />
+    <input id="newWeekName" type="text" placeholder="e.g. week2" />
     <button id="createWeekBtn" type="button">Create week</button>
     <div id="tablesRoot"></div>
 
     <script>
+      const tablesRoot = document.getElementById("tablesRoot");
+      const weekSelect = document.getElementById("weekSelect");
+      const newWeekName = document.getElementById("newWeekName");
+      const createWeekBtn = document.getElementById("createWeekBtn");
       const currentUser = "kf";
       const days = [
         "monday",
@@ -66,61 +118,143 @@
         "Saturday",
         "Sunday",
       ];
-
-      const tablesRoot = document.getElementById("tablesRoot");
-      const weekSelect = document.getElementById("weekSelect");
-      const newWeekName = document.getElementById("newWeekName");
-      const createWeekBtn = document.getElementById("createWeekBtn");
+      const formulaColumns = [
+        {
+          label: "Sum",
+          compute: (values) =>
+            values.reduce((total, value) => total + value, 0),
+        },
+        {
+          label: "Mean",
+          compute: (values) =>
+            values.length
+              ? (
+                  values.reduce((total, value) => total + value, 0) /
+                  values.length
+                ).toFixed(2)
+              : "",
+        },
+        {
+          label: "Max",
+          compute: (values) => (values.length ? Math.max(...values) : ""),
+        },
+      ];
 
       let data = { db: {} };
+      let users = [];
       let currentWeek = "week1";
 
-      function users() {
-        return Object.keys(data.db);
+      function escapeHtml(value) {
+        return String(value).replace(
+          /[&<>"]|'/g,
+          (char) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[char],
+        );
       }
 
-      function weeks() {
-        const set = new Set();
+      function rebuildUsers() {
+        users = Object.keys(data.db).map((userId) => ({
+          id: userId,
+          label: userId,
+          editable: userId === currentUser,
+        }));
+      }
+
+      function rebuildWeeks() {
+        const weekSet = new Set();
+
         Object.values(data.db).forEach((userData) => {
-          Object.keys(userData || {}).forEach((weekName) => set.add(weekName));
+          Object.keys(userData || {}).forEach((weekKey) =>
+            weekSet.add(weekKey),
+          );
         });
-        return Array.from(set);
-      }
 
-      function setCurrentWeek(weekName) {
-        currentWeek = weekName;
-        render();
+        const weeks = Array.from(weekSet);
+        if (!weeks.includes(currentWeek)) {
+          currentWeek = weeks[0] || "week1";
+        }
+
+        weekSelect.innerHTML = weeks
+          .map((weekKey) => {
+            const selected = weekKey === currentWeek ? "selected" : "";
+            return `<option value="${weekKey}" ${selected}>${weekKey}</option>`;
+          })
+          .join("");
+
+        if (!weeks.length) {
+          weekSelect.innerHTML = '<option value="week1">week1</option>';
+          weekSelect.value = "week1";
+          currentWeek = "week1";
+        }
       }
 
       function createWeek(weekName) {
-        const name = weekName.trim();
-        if (!name) return;
+        const trimmedName = weekName.trim();
+        if (!trimmedName) return;
 
-        users().forEach((userId) => {
-          if (!data.db[userId][name]) data.db[userId][name] = {};
+        Object.keys(data.db).forEach((userId) => {
+          if (!data.db[userId][trimmedName]) {
+            data.db[userId][trimmedName] = {};
+          }
         });
 
-        currentWeek = name;
+        currentWeek = trimmedName;
+        init();
+        weekSelect.value = trimmedName;
         newWeekName.value = "";
-        render();
       }
 
-      function valueFor(userId, exercise, day) {
+      function ensurePath(userId, exercise) {
+        if (!data.db[userId]) data.db[userId] = {};
+        if (!data.db[userId][currentWeek]) data.db[userId][currentWeek] = {};
+        if (!data.db[userId][currentWeek][exercise])
+          data.db[userId][currentWeek][exercise] = {};
+      }
+
+      function updateCell(userId, exercise, day, value) {
+        ensurePath(userId, exercise);
+        data.db[userId][currentWeek][exercise][day] = value;
+      }
+
+      function loadWeek1Value(userId, exercise, day) {
         return data.db[userId]?.[currentWeek]?.[exercise]?.[day] ?? "";
       }
 
-      function renderTable(userId, editable) {
+      function rowValues(userId, exercise) {
+        return days
+          .map((day) => loadWeek1Value(userId, exercise, day))
+          .filter((value) => value !== "" && !Number.isNaN(Number(value)))
+          .map((value) => Number(value));
+      }
+
+      function buildTable(user) {
         const rows = exercises
           .map((exercise) => {
+            const values = rowValues(user.id, exercise);
+            const formulaCells = formulaColumns
+              .map(
+                (formula, index) =>
+                  `<td class="formula-cell" data-formula-index="${index}">${formula.compute(values)}</td>`,
+              )
+              .join("");
+
             const cells = days
               .map((day) => {
-                const value = valueFor(userId, exercise, day);
-                const disabled = editable ? "" : "disabled";
+                const value = escapeHtml(
+                  loadWeek1Value(user.id, exercise, day),
+                );
+                const disabled = user.editable ? "" : "disabled";
                 return `<td><input type="number" name="${exercise}_${day}" value="${value}" ${disabled} /></td>`;
               })
               .join("");
 
-            return `<tr><td>${exercise.toUpperCase()}</td>${cells}</tr>`;
+            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${cells}${formulaCells}</tr>`;
           })
           .join("");
 
@@ -128,76 +262,72 @@
           <table>
             <tr>
               <th>Exercise</th>
-              ${dayLabels.map((day) => `<th>${day}</th>`).join("")}
+              ${dayLabels.map((label) => `<th>${label}</th>`).join("")}
+              ${formulaColumns.map((formula) => `<th>${formula.label}</th>`).join("")}
             </tr>
             ${rows}
           </table>
         `;
       }
 
-      function render() {
-        weekSelect.innerHTML = weeks()
-          .map(
-            (weekName) =>
-              `<option value="${weekName}" ${weekName === currentWeek ? "selected" : ""}>${weekName}</option>`,
-          )
-          .join("");
+      function buildUserSection(user) {
+        const section = document.createElement("section");
+        section.className = user.editable ? "" : "readonly";
+        section.innerHTML = `
+          <div>${user.label}</div>
+          <div class="table-wrap">${buildTable(user)}</div>
+        `;
 
-        if (!currentWeek || !weeks().includes(currentWeek)) {
-          currentWeek = weeks()[0] || "week1";
-          if (!weekSelect.value) weekSelect.value = currentWeek;
-        }
-
-        tablesRoot.innerHTML = users()
-          .map((userId) => {
-            const editable = userId === currentUser;
-            return `
-              <section class="${editable ? "" : "readonly"}">
-                <div>${userId}</div>
-                ${renderTable(userId, editable)}
-              </section>
-            `;
-          })
-          .join("");
-
-        const currentSection = tablesRoot.querySelector(
-          "section:not(.readonly)",
-        );
-        if (currentSection) {
-          currentSection
+        if (user.id === currentUser) {
+          section
             .querySelectorAll("input[type='number']")
             .forEach((inputEl) => {
               inputEl.addEventListener("input", () => {
+                const row = inputEl.closest("tr");
                 const [exercise, day] = inputEl.name.split("_");
                 const value = inputEl.value === "" ? "" : Number(inputEl.value);
-
-                if (!data.db[currentUser]) data.db[currentUser] = {};
-                if (!data.db[currentUser][currentWeek])
-                  data.db[currentUser][currentWeek] = {};
-                if (!data.db[currentUser][currentWeek][exercise])
-                  data.db[currentUser][currentWeek][exercise] = {};
-
-                data.db[currentUser][currentWeek][exercise][day] = value;
+                updateCell(currentUser, exercise, day, value);
+                if (row) {
+                  const values = rowValues(currentUser, exercise);
+                  row.querySelectorAll(".formula-cell").forEach((cell) => {
+                    const formulaIndex = Number(cell.dataset.formulaIndex);
+                    cell.textContent =
+                      formulaColumns[formulaIndex].compute(values);
+                  });
+                }
               });
             });
         }
 
-        weekSelect.value = currentWeek;
+        tablesRoot.appendChild(section);
       }
 
-      weekSelect.addEventListener("change", () =>
-        setCurrentWeek(weekSelect.value),
-      );
-      createWeekBtn.addEventListener("click", () =>
-        createWeek(newWeekName.value),
-      );
+      function init() {
+        tablesRoot.innerHTML = "";
+        rebuildUsers();
+        rebuildWeeks();
+        for (const user of users) {
+          buildUserSection(user);
+        }
+      }
+
+      weekSelect.addEventListener("change", () => {
+        currentWeek = weekSelect.value;
+        init();
+      });
+
+      createWeekBtn.addEventListener("click", () => {
+        createWeek(newWeekName.value);
+      });
 
       async function loadJson() {
-        const response = await fetch("./data/user.json");
-        data = await response.json();
-        if (!data.db || typeof data.db !== "object") data = { db: {} };
-        currentWeek = weeks()[0] || "week1";
-        render();
+        try {
+          const response = await fetch("./data/user.json");
+          if (!response.ok) throw new Error("fetch failed");
+          data = await response.json();
+          if (!data.db || typeof data.db !== "object") data = { db: {} };
+          init();
+        } catch {}
       }
 
       loadJson();
