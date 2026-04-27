@@ -16,3 +16,6 @@ pb_data/
 # Logs / local noise
 *.log
 .DS_Store
+
+
+README.md

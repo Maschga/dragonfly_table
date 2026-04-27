@@ -3,6 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Dragonfly Tables helps track weekly exercise goals with PocketBase-backed backups."
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="api-base" content="" />
     <title>Dragonfly Tables</title>
     <style>
       body {
@@ -65,6 +71,35 @@
       .table-wrap {
         overflow-x: auto;
       }
+
+      .goal-col {
+        border-right: 3px solid #999;
+        background: #fafafa;
+      }
+
+      .performance-cell {
+        min-width: 92px;
+        font-weight: 600;
+      }
+
+      .performance-percent {
+        color: #1f1f1f;
+      }
+
+      .goal-yes {
+        background: #d7f5d7;
+        color: #0f5a0f;
+      }
+
+      .goal-no {
+        background: #f7d7d7;
+        color: #8c1414;
+      }
+
+      .performance-neutral {
+        background: #f3f3f3;
+        color: #666;
+      }
     </style>
   </head>
   <body>
@@ -81,16 +116,25 @@
     <div>
       <label for="weekSelect">Week:</label>
       <select id="weekSelect"></select>
-      <input id="newWeekName" type="text" placeholder="week2" />
-      <button id="createWeekBtn" type="button">Create week</button>
+      <input
+        id="customWeekName"
+        type="text"
+        placeholder="Week 06.04.26 - 13.04.26"
+      />
+      <button id="createCustomWeekBtn" type="button">Create custom week</button>
+      <button id="createWeekBtn" type="button">Create current week</button>
+      <button id="backupBtn" type="button">Export backup JSON</button>
     </div>
 
     <div id="tablesRoot"></div>
 
     <script>
-      const API_BASE = window.location.origin.startsWith("http")
-        ? window.location.origin
-        : "http://127.0.0.1:8090";
+      const API_BASE =
+        window.__DRAGONFLY_API_BASE__ ||
+        document.querySelector('meta[name="api-base"]')?.content ||
+        (window.location.origin.startsWith("http")
+          ? window.location.origin
+          : "http://127.0.0.1:8090");
       const AUTH_KEY = "dragonfly_pb_auth";
 
       const days = [
@@ -112,26 +156,11 @@
         "Saturday",
         "Sunday",
       ];
-      const formulaColumns = [
-        {
-          label: "Sum",
-          compute: (values) =>
-            values.reduce((total, value) => total + value, 0),
-        },
-        {
-          label: "Mean",
-          compute: (values) =>
-            values.length
-              ? (
-                  values.reduce((total, value) => total + value, 0) /
-                  values.length
-                ).toFixed(2)
-              : "",
-        },
-        {
-          label: "Max",
-          compute: (values) => (values.length ? Math.max(...values) : ""),
-        },
+      const performanceColumns = [
+        "Sum",
+        "Percentage of goal",
+        "Mean",
+        "Std Dev",
       ];
 
       const usernameInput = document.getElementById("username");
@@ -139,8 +168,12 @@
       const loginBtn = document.getElementById("loginBtn");
       const registerBtn = document.getElementById("registerBtn");
       const weekSelect = document.getElementById("weekSelect");
-      const newWeekName = document.getElementById("newWeekName");
+      const customWeekName = document.getElementById("customWeekName");
+      const createCustomWeekBtn = document.getElementById(
+        "createCustomWeekBtn",
+      );
       const createWeekBtn = document.getElementById("createWeekBtn");
+      const backupBtn = document.getElementById("backupBtn");
       const messageEl = document.getElementById("message");
       const tablesRoot = document.getElementById("tablesRoot");
 
@@ -159,6 +192,43 @@
 
       function saveAuth() {
         if (auth) localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+      }
+
+      function downloadTextFile(filename, content) {
+        const blob = new Blob([content], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function exportBackup() {
+        const backup = {
+          exportedAt: new Date().toISOString(),
+          app: "Dragonfly Tables",
+          currentWeek,
+          weeks: sortWeeks(allWeeks()),
+          workbooks: workbooks.map((workbook) => ({
+            id: workbook.id,
+            userId: workbook.userId,
+            label: workbook.label,
+            db: workbook.db,
+          })),
+        };
+
+        const stamp = new Date()
+          .toISOString()
+          .replaceAll(":", "-")
+          .replaceAll(".", "-");
+        downloadTextFile(
+          `dragonfly-backup-${stamp}.json`,
+          JSON.stringify(backup, null, 2),
+        );
+        setMessage("Backup JSON downloaded.");
       }
 
       function setMessage(text) {
@@ -213,13 +283,107 @@
         return Array.from(weeks);
       }
 
-      function syncWeekSelect() {
-        const weeks = allWeeks();
-        if (weeks.length && !weeks.includes(currentWeek))
-          currentWeek = weeks[0];
-        if (!weeks.length) currentWeek = currentWeek || "week1";
+      function mondayStartOf(date) {
+        const local = new Date(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate(),
+        );
+        const day = local.getDay();
+        const diff = day === 0 ? -6 : 1 - day;
+        local.setDate(local.getDate() + diff);
+        local.setHours(0, 0, 0, 0);
+        return local;
+      }
 
-        weekSelect.innerHTML = (weeks.length ? weeks : ["week1"])
+      function addDays(date, count) {
+        const result = new Date(date);
+        result.setDate(result.getDate() + count);
+        return result;
+      }
+
+      function formatWeekDate(date) {
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = String(date.getFullYear()).slice(-2);
+        return `${day}.${month}.${year}`;
+      }
+
+      function weekLabelFromMonday(monday) {
+        const nextMonday = addDays(monday, 7);
+        return `Week ${formatWeekDate(monday)} - ${formatWeekDate(nextMonday)}`;
+      }
+
+      function currentDateWeekLabel() {
+        return weekLabelFromMonday(mondayStartOf(new Date()));
+      }
+
+      function parseWeekLabelStart(weekName) {
+        const match = /^Week (\d{2})\.(\d{2})\.(\d{2}) -/.exec(weekName);
+        if (!match) return null;
+        const [, dd, mm, yy] = match;
+        return new Date(Number(`20${yy}`), Number(mm) - 1, Number(dd));
+      }
+
+      function sortWeeks(weeks) {
+        return [...weeks].sort((left, right) => {
+          const leftDate = parseWeekLabelStart(left);
+          const rightDate = parseWeekLabelStart(right);
+          if (leftDate && rightDate) return leftDate - rightDate;
+          return left.localeCompare(right);
+        });
+      }
+
+      function previousWeekName(weekName, workbook) {
+        const sorted = sortWeeks(Object.keys(workbook.db || {}));
+        const index = sorted.indexOf(weekName);
+        if (index <= 0) return null;
+        return sorted[index - 1];
+      }
+
+      function copyGoals(workbook, fromWeek, toWeek) {
+        if (!fromWeek || !workbook.db[fromWeek]) return;
+        if (!workbook.db[toWeek]) workbook.db[toWeek] = {};
+
+        exercises.forEach((exercise) => {
+          const sourceGoal = workbook.db[fromWeek]?.[exercise]?.goal;
+          if (sourceGoal === undefined || sourceGoal === "") return;
+
+          if (!workbook.db[toWeek][exercise])
+            workbook.db[toWeek][exercise] = {};
+          if (workbook.db[toWeek][exercise].goal === undefined) {
+            workbook.db[toWeek][exercise].goal = sourceGoal;
+          }
+        });
+      }
+
+      function ensureWeekForWorkbook(workbook, weekName) {
+        if (workbook.db[weekName]) return false;
+
+        workbook.db[weekName] = {};
+        const previousWeek = previousWeekName(weekName, workbook);
+        copyGoals(workbook, previousWeek, weekName);
+        return true;
+      }
+
+      function ensureWeekForAllWorkbooks(weekName) {
+        let currentUserChanged = false;
+        workbooks.forEach((workbook) => {
+          const changed = ensureWeekForWorkbook(workbook, weekName);
+          if (changed && workbook.userId === currentUserId()) {
+            currentUserChanged = true;
+          }
+        });
+        return currentUserChanged;
+      }
+
+      function syncWeekSelect() {
+        const weeks = sortWeeks(allWeeks());
+        if (weeks.length && !weeks.includes(currentWeek))
+          currentWeek = weeks[weeks.length - 1];
+        if (!weeks.length) currentWeek = currentWeek || currentDateWeekLabel();
+
+        weekSelect.innerHTML = (weeks.length ? weeks : [currentDateWeekLabel()])
           .map(
             (weekName) =>
               `<option value="${weekName}" ${weekName === currentWeek ? "selected" : ""}>${weekName}</option>`,
@@ -235,16 +399,115 @@
           .map(Number);
       }
 
+      function getExerciseStats(workbook, exercise) {
+        const values = rowValues(workbook, exercise);
+        const sum = values.reduce((total, value) => total + value, 0);
+        const mean = values.length ? sum / values.length : null;
+        const variance = values.length
+          ? values.reduce((total, value) => total + (value - mean) ** 2, 0) /
+            values.length
+          : null;
+        const stdDev = variance === null ? null : Math.sqrt(variance);
+        const goalRaw = workbook.db?.[currentWeek]?.[exercise]?.goal;
+        const goal =
+          goalRaw === "" || goalRaw === undefined ? null : Number(goalRaw);
+        const hasGoal = Number.isFinite(goal) && goal > 0;
+        const percentage = hasGoal ? (sum / goal) * 100 : null;
+
+        return { sum, hasGoal, percentage, mean, stdDev };
+      }
+
+      function percentageBackground(percentage) {
+        const clamped = Math.max(0, Math.min(100, percentage));
+        const hue = clamped * 1.2;
+        return `hsl(${hue} 78% 86%)`;
+      }
+
+      function renderPerformanceCell(index, stats) {
+        if (index === 0) {
+          return `<td class="performance-cell" data-performance-index="0">${stats.sum}</td>`;
+        }
+
+        if (index === 1) {
+          if (!stats.hasGoal) {
+            return `<td class="performance-cell performance-neutral" data-performance-index="1">—</td>`;
+          }
+
+          const percent = Math.max(0, stats.percentage);
+          const label = `${Math.round(percent)}%`;
+          const background = percentageBackground(percent);
+          return `<td class="performance-cell performance-percent" data-performance-index="1" style="background:${background}">${label}</td>`;
+        }
+
+        if (index === 2) {
+          if (stats.mean === null) {
+            return `<td class="performance-cell performance-neutral" data-performance-index="2">—</td>`;
+          }
+
+          return `<td class="performance-cell" data-performance-index="2">${stats.mean.toFixed(2)}</td>`;
+        }
+
+        if (stats.stdDev === null) {
+          return `<td class="performance-cell performance-neutral" data-performance-index="3">—</td>`;
+        }
+
+        return `<td class="performance-cell" data-performance-index="3">${stats.stdDev.toFixed(2)}</td>`;
+      }
+
+      function applyPerformanceCell(cell, index, stats) {
+        cell.className = "performance-cell";
+        cell.style.background = "";
+
+        if (index === 0) {
+          cell.textContent = String(stats.sum);
+          return;
+        }
+
+        if (index === 1) {
+          if (!stats.hasGoal) {
+            cell.textContent = "—";
+            cell.classList.add("performance-neutral");
+            return;
+          }
+
+          const percent = Math.max(0, stats.percentage);
+          cell.textContent = `${Math.round(percent)}%`;
+          cell.classList.add("performance-percent");
+          cell.style.background = percentageBackground(percent);
+          return;
+        }
+
+        if (index === 2) {
+          if (stats.mean === null) {
+            cell.textContent = "—";
+            cell.classList.add("performance-neutral");
+            return;
+          }
+
+          cell.textContent = stats.mean.toFixed(2);
+          return;
+        }
+
+        if (stats.stdDev === null) {
+          cell.textContent = "—";
+          cell.classList.add("performance-neutral");
+          return;
+        }
+
+        cell.textContent = stats.stdDev.toFixed(2);
+      }
+
       function buildTable(workbook) {
         const rows = exercises
           .map((exercise) => {
-            const values = rowValues(workbook, exercise);
-            const formulas = formulaColumns
-              .map(
-                (formula, index) =>
-                  `<td class="formula-cell" data-formula-index="${index}">${formula.compute(values)}</td>`,
-              )
+            const stats = getExerciseStats(workbook, exercise);
+            const performanceCells = performanceColumns
+              .map((_, index) => renderPerformanceCell(index, stats))
               .join("");
+            const goalValue =
+              workbook.db?.[currentWeek]?.[exercise]?.goal ?? "";
+            const goalDisabled = workbook.editable ? "" : "disabled";
+            const goalCell = `<td class="goal-col"><input type="number" name="${exercise}_goal" value="${goalValue}" ${goalDisabled} /></td>`;
             const cells = days
               .map((day) => {
                 const value =
@@ -253,7 +516,7 @@
                 return `<td><input type="number" name="${exercise}_${day}" value="${value}" ${disabled} /></td>`;
               })
               .join("");
-            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${cells}${formulas}</tr>`;
+            return `<tr data-exercise="${exercise}"><td>${exercise.toUpperCase()}</td>${goalCell}${cells}${performanceCells}</tr>`;
           })
           .join("");
 
@@ -261,19 +524,20 @@
           <table>
             <tr>
               <th>Exercise</th>
+              <th class="goal-col">Goal</th>
               ${dayLabels.map((label) => `<th>${label}</th>`).join("")}
-              ${formulaColumns.map((formula) => `<th>${formula.label}</th>`).join("")}
+              ${performanceColumns.map((label) => `<th>${label}</th>`).join("")}
             </tr>
             ${rows}
           </table>
         `;
       }
 
-      function refreshFormulaCells(row, workbook, exercise) {
-        const values = rowValues(workbook, exercise);
-        row.querySelectorAll(".formula-cell").forEach((cell) => {
-          const index = Number(cell.dataset.formulaIndex);
-          cell.textContent = formulaColumns[index].compute(values);
+      function refreshPerformanceCells(row, workbook, exercise) {
+        const stats = getExerciseStats(workbook, exercise);
+        row.querySelectorAll(".performance-cell").forEach((cell) => {
+          const index = Number(cell.dataset.performanceIndex);
+          applyPerformanceCell(cell, index, stats);
         });
       }
 
@@ -315,7 +579,7 @@
                     const value =
                       inputEl.value === "" ? "" : Number(inputEl.value);
                     setCell(workbook, exercise, day, value);
-                    if (row) refreshFormulaCells(row, workbook, exercise);
+                    if (row) refreshPerformanceCells(row, workbook, exercise);
                     saveWorkbook().catch((error) =>
                       setMessage(error.message || "Save failed"),
                     );
@@ -327,7 +591,7 @@
           });
       }
 
-      function createWeek(weekName) {
+      async function createWeek(weekName) {
         const name = weekName.trim();
         if (!name) return;
 
@@ -337,11 +601,13 @@
           return;
         }
 
-        if (!workbook.db[name]) workbook.db[name] = {};
+        const currentUserChanged = ensureWeekForAllWorkbooks(name);
         currentWeek = name;
-        newWeekName.value = "";
         render();
-        saveWorkbook().catch((error) =>
+
+        if (!currentUserChanged) return;
+
+        await saveWorkbook().catch((error) =>
           setMessage(error.message || "Save failed"),
         );
       }
@@ -363,7 +629,12 @@
         }));
 
         workbookForCurrentUser();
-        currentWeek = allWeeks()[0] || "week1";
+        const targetWeek = currentDateWeekLabel();
+        const currentUserChanged = ensureWeekForAllWorkbooks(targetWeek);
+        currentWeek = targetWeek;
+        if (currentUserChanged) {
+          await saveWorkbook();
+        }
         render();
       }
 
@@ -445,9 +716,9 @@
           return;
         }
 
-        if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+        if (!/^[a-zA-Z0-9._-]{2,32}$/.test(username)) {
           setMessage(
-            "Username must be 3-32 chars: letters, numbers, dot, dash, underscore.",
+            "Username must be 2-32 chars: letters, numbers, dot, dash, underscore.",
           );
           return;
         }
@@ -492,9 +763,21 @@
         render();
       });
 
-      createWeekBtn.addEventListener("click", () =>
-        createWeek(newWeekName.value),
-      );
+      createWeekBtn.addEventListener("click", () => {
+        createWeek(currentDateWeekLabel()).catch((error) =>
+          setMessage(error.message),
+        );
+      });
+
+      createCustomWeekBtn.addEventListener("click", () => {
+        createWeek(customWeekName.value).catch((error) =>
+          setMessage(error.message),
+        );
+      });
+
+      backupBtn.addEventListener("click", () => {
+        exportBackup();
+      });
 
       if (auth?.record?.username) {
         setMessage(`Logged in as ${auth.record.username}`);
