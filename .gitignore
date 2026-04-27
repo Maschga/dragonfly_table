@@ -1,0 +1,18 @@
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# PocketBase runtime data and SQLite files
+pb_data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs / local noise
+*.log
+.DS_Store
