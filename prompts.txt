@@ -1,5 +1,0 @@
-Highlight goal with yellowish and sum with purplish the way you highlighted weight with bluish.
-Remember that one's own table should be shown above the other user's tables
-Maybe the columns dont all need to be quite as wide
-
-Add left/right arrow buttons to switch weeks

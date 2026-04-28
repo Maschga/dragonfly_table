@@ -31,6 +31,7 @@
       td {
         padding: 6px 8px;
         text-align: center;
+        min-width: 56px;
       }
 
       input,
@@ -75,10 +76,15 @@
       .goal-col {
         border-right: 3px solid #999;
         background: #fafafa;
+        background: #fff6cc;
       }
 
       .weight-col {
         background: #f4f8ff;
+      }
+
+      .sum-cell {
+        background: #efe4ff;
       }
 
       .weight-input {
@@ -91,7 +97,7 @@
       }
 
       .performance-cell {
-        min-width: 92px;
+        min-width: 78px;
         font-weight: 600;
       }
 
@@ -137,7 +143,11 @@
 
     <div>
       <label for="weekSelect">Week:</label>
+      <button id="prevWeekBtn" type="button" aria-label="Previous week">
+        ←
+      </button>
       <select id="weekSelect"></select>
+      <button id="nextWeekBtn" type="button" aria-label="Next week">→</button>
       <!-- <input
         id="customWeekName"
         type="text"
@@ -177,6 +187,8 @@
       const loginBtn = document.getElementById("loginBtn");
       const registerBtn = document.getElementById("registerBtn");
       const weekSelect = document.getElementById("weekSelect");
+      const prevWeekBtn = document.getElementById("prevWeekBtn");
+      const nextWeekBtn = document.getElementById("nextWeekBtn");
       const customWeekName = document.getElementById("customWeekName");
       const createCustomWeekBtn = document.getElementById(
         "createCustomWeekBtn",
@@ -412,6 +424,11 @@
           )
           .join("");
         weekSelect.value = currentWeek;
+        prevWeekBtn.disabled = weeks.indexOf(currentWeek) <= 0;
+        nextWeekBtn.disabled =
+          weeks.indexOf(currentWeek) < 0 ||
+          weeks.indexOf(currentWeek) >= weeks.length - 1;
+        return weeks;
       }
 
       function rowValues(workbook, exercise) {
@@ -484,18 +501,18 @@
 
       function renderPerformanceCell(index, stats) {
         if (index === 0) {
-          return `<td class="performance-cell" data-performance-index="0">${stats.sum}</td>`;
+          return `<td class="performance-cell sum-cell" data-performance-index="0">${stats.sum}</td>`;
         }
 
         if (index === 1) {
           if (!stats.hasGoal) {
-            return `<td class="performance-cell performance-neutral" data-performance-index="1">—</td>`;
+            return `<td class="performance-cell goal-col performance-neutral" data-performance-index="1">—</td>`;
           }
 
           const percent = Math.max(0, stats.percentage);
           const label = `${Math.round(percent)}%`;
           const background = percentageBackground(percent);
-          return `<td class="performance-cell performance-percent" data-performance-index="1" style="background:${background}">${label}</td>`;
+          return `<td class="performance-cell goal-col performance-percent" data-performance-index="1" style="background:${background}">${label}</td>`;
         }
 
         if (index === 2) {
@@ -527,18 +544,21 @@
 
         if (index === 0) {
           cell.textContent = String(stats.sum);
+          cell.classList.add("sum-cell");
           return;
         }
 
         if (index === 1) {
           if (!stats.hasGoal) {
             cell.textContent = "—";
+            cell.classList.add("goal-col");
             cell.classList.add("performance-neutral");
             return;
           }
 
           const percent = Math.max(0, stats.percentage);
           cell.textContent = `${Math.round(percent)}%`;
+          cell.classList.add("goal-col");
           cell.classList.add("performance-percent");
           cell.style.background = percentageBackground(percent);
           return;
@@ -681,7 +701,15 @@
         syncWeekSelect();
         tablesRoot.innerHTML = "";
 
-        workbooks
+        const sortedWorkbooks = [...workbooks].sort((left, right) => {
+          const currentId = currentUserId();
+          if (left.userId === currentId && right.userId !== currentId)
+            return -1;
+          if (right.userId === currentId && left.userId !== currentId) return 1;
+          return String(left.label).localeCompare(String(right.label));
+        });
+
+        sortedWorkbooks
           .map((workbook) => ({
             ...workbook,
             editable: workbook.userId === currentUserId(),
@@ -892,6 +920,24 @@
       weekSelect.addEventListener("change", () => {
         currentWeek = weekSelect.value;
         render();
+      });
+
+      prevWeekBtn.addEventListener("click", () => {
+        const weeks = sortWeeks(allWeeks());
+        const index = weeks.indexOf(currentWeek);
+        if (index > 0) {
+          currentWeek = weeks[index - 1];
+          render();
+        }
+      });
+
+      nextWeekBtn.addEventListener("click", () => {
+        const weeks = sortWeeks(allWeeks());
+        const index = weeks.indexOf(currentWeek);
+        if (index >= 0 && index < weeks.length - 1) {
+          currentWeek = weeks[index + 1];
+          render();
+        }
       });
 
       createWeekBtn.addEventListener("click", () => {
