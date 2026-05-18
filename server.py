@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT / "data" / "user.json"
-DEFAULT_PORT = int(os.environ.get("PORT", "8090"))
+DEFAULT_PORT = int(os.environ.get("PORT", "1337"))
 DEFAULT_HOST = os.environ.get("HOST", "0.0.0.0")
 ITERATIONS = 210_000
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7

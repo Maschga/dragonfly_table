@@ -58,3 +58,18 @@ docker compose logs -f dragonfly
 docker compose restart dragonfly
 docker compose down
 ```
+
+## Automated backups (daily)
+
+You can schedule daily backups of `data/user.json` using the included script `scripts/backup_users.py`.
+
+Example cron entry (runs daily at 03:00):
+
+```
+# run with the project's Python (adjust path to python as needed)
+0 3 * * * /home/kf/Files/Programming/dragonfly/.venv/bin/python /home/kf/Files/Programming/dragonfly/scripts/backup_users.py >> /home/kf/Files/Programming/dragonfly/backup.log 2>&1
+```
+
+The script writes timestamped files into `data/backups/` and removes backups older than 14 days.
+
+If you use `docker compose up` to run the app, a `backup` service is included in `docker-compose.yml` that runs the backup script once per day while the stack is up. The service shares the project volume so backups are written into `data/backups/` on the host.

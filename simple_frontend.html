@@ -757,6 +757,37 @@
                     setMessage(error.message || "Save failed"),
                   );
                 });
+
+                // Alert on focus lost if the input contains invalid numeric content
+                inputEl.addEventListener("blur", () => {
+                  if (!guardAuthenticatedEdit()) return;
+                  const raw = String(inputEl.value ?? "");
+                  const name = inputEl.name || "";
+                  const isWeight =
+                    name.endsWith("_weight") ||
+                    inputEl.classList.contains("weight-input");
+
+                  if (isWeight) {
+                    const parsed = parseWeightValue(raw);
+                    if (raw.trim() !== "" && parsed === null) {
+                      alert(
+                        "Invalid weight value. Use a number or ratio like 1/6.",
+                      );
+                      setMessage("Invalid weight input.");
+                    }
+                  } else {
+                    // numeric day/goal inputs: only alert on blur if not a finite number
+                    if (raw.trim() !== "") {
+                      const numeric = Number(raw);
+                      if (!Number.isFinite(numeric)) {
+                        alert(
+                          "Invalid numeric input. Please enter a numeric value.",
+                        );
+                        setMessage("Invalid numeric input.");
+                      }
+                    }
+                  }
+                });
               });
             }
 

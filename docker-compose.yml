@@ -4,6 +4,14 @@ services:
     command: ["python", "/app/server.py"]
     working_dir: /app
     ports:
-      - "8090:8090"
+      - "1337:1337"
     volumes:
       - .:/app
+  backup:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    # run backup script once per day while the stack is up
+    command: ["sh", "-c", "while true; do python /app/scripts/backup_users.py; sleep 86400; done"]
+    restart: always
