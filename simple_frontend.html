@@ -677,6 +677,28 @@
         });
       }
 
+      function refreshWeeklySummary(section, workbook) {
+        const weeklySummary = getWeeklyWeightedSummary(workbook);
+        const summaryCells = section.querySelectorAll(".weekly-summary td");
+        if (summaryCells.length < 3) return;
+
+        summaryCells[0].textContent =
+          weeklySummary.weightedGoalTotal.toFixed(2);
+        summaryCells[1].textContent = weeklySummary.weightedTotal.toFixed(2);
+
+        const percentCell = summaryCells[2];
+        percentCell.className = "performance-cell performance-percent";
+        percentCell.style.background = "";
+        if (weeklySummary.weightedPercentage === null) {
+          percentCell.textContent = "—";
+          return;
+        }
+
+        const percent = Math.max(0, weeklySummary.weightedPercentage);
+        percentCell.textContent = `${Math.round(percent)}%`;
+        percentCell.style.background = percentageBackground(percent);
+      }
+
       function ensureCellPath(workbook, exercise) {
         if (!workbook.db[currentWeek]) workbook.db[currentWeek] = {};
         if (!workbook.db[currentWeek][exercise])
@@ -733,6 +755,8 @@
               <div class="table-wrap">${buildTable(workbook)}</div>
             `;
 
+            refreshWeeklySummary(section, workbook);
+
             if (workbook.editable) {
               section.querySelectorAll("input").forEach((inputEl) => {
                 inputEl.addEventListener("input", () => {
@@ -753,6 +777,7 @@
                   }
                   setCell(workbook, exercise, day, value);
                   if (row) refreshPerformanceCells(row, workbook, exercise);
+                  refreshWeeklySummary(section, workbook);
                   saveWorkbook().catch((error) =>
                     setMessage(error.message || "Save failed"),
                   );
