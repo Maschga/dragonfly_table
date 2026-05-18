@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Dragonfly Tables helps track weekly exercise goals with PocketBase-backed backups."
+      content="Dragonfly Tables helps track weekly exercise goals with local JSON-backed storage."
     />
     <meta name="theme-color" content="#ffffff" />
-    <meta name="api-base" content="" />
     <title>Dragonfly Tables</title>
     <style>
       body {
@@ -163,11 +162,10 @@
     <script>
       const API_BASE =
         window.__DRAGONFLY_API_BASE__ ||
-        document.querySelector('meta[name="api-base"]')?.content ||
         (window.location.origin.startsWith("http")
           ? window.location.origin
           : "http://127.0.0.1:8090");
-      const AUTH_KEY = "dragonfly_pb_auth";
+      const AUTH_KEY = "dragonfly_local_auth";
 
       const days = [
         "monday",
@@ -215,6 +213,11 @@
         if (auth) localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
       }
 
+      function clearAuth() {
+        auth = null;
+        localStorage.removeItem(AUTH_KEY);
+      }
+
       function downloadTextFile(filename, content) {
         const blob = new Blob([content], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -254,6 +257,14 @@
 
       function setMessage(text) {
         messageEl.textContent = text;
+      }
+
+      function guardAuthenticatedEdit() {
+        if (currentUserId()) return true;
+        const message = "Log in first.";
+        setMessage(message);
+        alert(message);
+        return false;
       }
 
       function api(path, options = {}) {
@@ -725,6 +736,9 @@
             if (workbook.editable) {
               section.querySelectorAll("input").forEach((inputEl) => {
                 inputEl.addEventListener("input", () => {
+                  if (!guardAuthenticatedEdit()) {
+                    return;
+                  }
                   const row = inputEl.closest("tr");
                   const [exercise, day] = inputEl.name.split("_");
                   let value;
@@ -764,25 +778,30 @@
         currentWeek = name;
         render();
 
-        if (!currentUserChanged) return;
-
-        await saveWorkbook().catch((error) =>
-          setMessage(error.message || "Save failed"),
-        );
+        if (currentUserChanged) {
+          await saveWorkbook().catch((error) =>
+            setMessage(error.message || "Save failed"),
+          );
+        }
       }
 
       async function loadWorkbooks() {
-        const response = await api(
-          "/api/collections/workbooks/records?perPage=200&skipTotal=1&expand=user",
-        );
+        const response = await api("/api/workbooks");
         const result = await response.json();
-        if (!response.ok)
+        if (response.status === 401) {
+          clearAuth();
+          setMessage("Session expired. Log in again.");
+          render();
+          return;
+        }
+        if (!response.ok) {
           throw new Error(result.message || "Could not load workbooks");
+        }
 
         workbooks = (result.items || []).map((record) => ({
           id: record.id,
-          userId: record.user,
-          label: record.expand?.user?.username || record.user,
+          userId: record.userId,
+          label: record.label || record.userId,
           db: record.db || {},
           editable: false,
         }));
@@ -801,49 +820,25 @@
         const workbook = workbookForCurrentUser();
         if (!workbook) return;
 
-        const path = workbook.id
-          ? `/api/collections/workbooks/records/${workbook.id}`
-          : "/api/collections/workbooks/records";
-
-        const response = await api(path, {
-          method: workbook.id ? "PATCH" : "POST",
-          body: JSON.stringify({ user: currentUserId(), db: workbook.db }),
+        const response = await api("/api/workbooks", {
+          method: "PUT",
+          body: JSON.stringify({
+            workbooks: workbooks.map((item) => ({
+              userId: item.userId,
+              db: item.db,
+            })),
+          }),
         });
         const result = await response.json();
 
-        if (!response.ok)
+        if (response.status === 401) {
+          clearAuth();
+          throw new Error("Session expired. Log in again.");
+        }
+
+        if (!response.ok) {
           throw new Error(result.message || "Could not save workbook");
-        if (!workbook.id) workbook.id = result.id;
-      }
-
-      function escapeFilterValue(value) {
-        return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-      }
-
-      function emailFromUsername(username) {
-        const safe = encodeURIComponent(username).replaceAll("%", "");
-        return `u${safe}@local.invalid`;
-      }
-
-      function extractUsernameTakenError(result) {
-        const usernameError = result?.data?.username;
-        if (!Array.isArray(usernameError) || !usernameError.length) return null;
-        const isTaken = usernameError.some(
-          (item) => item?.code === "validation_not_unique",
-        );
-        return isTaken ? "Username already taken." : null;
-      }
-
-      async function isUsernameTaken(username) {
-        const filter = encodeURIComponent(
-          `username="${escapeFilterValue(username)}"`,
-        );
-        const response = await api(
-          `/api/collections/users/records?filter=${filter}&perPage=1&skipTotal=1`,
-        );
-        if (!response.ok) return false;
-        const result = await response.json();
-        return (result.items || []).length > 0;
+        }
       }
 
       async function login(identityArg, passwordArg) {
@@ -851,13 +846,10 @@
         const password = (passwordArg ?? passwordInput.value).trim();
         if (!identity || !password) return;
 
-        const response = await api(
-          "/api/collections/users/auth-with-password",
-          {
-            method: "POST",
-            body: JSON.stringify({ identity, password }),
-          },
-        );
+        const response = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ username: identity, password }),
+        });
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || "Login failed");
 
@@ -882,28 +874,17 @@
           return;
         }
 
-        const taken = await isUsernameTaken(username);
-        if (taken) {
-          setMessage("Username already taken.");
-          return;
-        }
-
-        const response = await api("/api/collections/users/records", {
+        const response = await api("/api/register", {
           method: "POST",
           body: JSON.stringify({
             username,
-            email: emailFromUsername(username),
             password,
-            passwordConfirm: password,
           }),
         });
         const result = await response.json();
 
         if (!response.ok) {
-          const takenMessage = extractUsernameTakenError(result);
-          throw new Error(
-            takenMessage || result.message || "Registration failed",
-          );
+          throw new Error(result.message || "Registration failed");
         }
 
         await login(username, password);
@@ -962,10 +943,30 @@
         setMessage(`Logged in as ${auth.record.username}`);
       }
 
-      loadWorkbooks().catch(() => {
-        setMessage("Log in to load PocketBase data.");
-        render();
+      ["beforeinput", "keydown", "paste", "drop"].forEach((eventName) => {
+        tablesRoot.addEventListener(
+          eventName,
+          (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement)) return;
+            if (currentUserId()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            guardAuthenticatedEdit();
+          },
+          true,
+        );
       });
+
+      if (auth?.token) {
+        loadWorkbooks().catch(() => {
+          setMessage("Log in to load local data.");
+          render();
+        });
+      } else {
+        setMessage("Log in to load local data.");
+        render();
+      }
     </script>
   </body>
 </html>

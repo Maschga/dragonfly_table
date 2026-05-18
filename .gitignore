@@ -7,7 +7,7 @@
 *.pfx
 secrets/
 
-# PocketBase runtime data and SQLite files
+# Legacy runtime data and SQLite files
 pb_data/
 *.db
 *.db-shm
