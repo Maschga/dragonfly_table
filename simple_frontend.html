@@ -133,10 +133,16 @@
     <h1>Input Tables</h1>
 
     <div>
-      <input id="username" type="text" placeholder="Username" />
-      <input id="password" type="password" placeholder="Password" />
-      <button id="loginBtn" type="button">Login</button>
-      <button id="registerBtn" type="button">Register</button>
+      <div id="authForm">
+        <input id="username" type="text" placeholder="Username" />
+        <input id="password" type="password" placeholder="Password" />
+        <button id="loginBtn" type="button">Login</button>
+        <button id="registerBtn" type="button">Register</button>
+      </div>
+      <div id="loggedInControls" hidden>
+        <span>Logged in as <strong id="loggedInUsername"></strong></span>
+        <button id="logoutBtn" type="button">Log out</button>
+      </div>
       <span id="message"></span>
     </div>
 
@@ -184,6 +190,10 @@
       const passwordInput = document.getElementById("password");
       const loginBtn = document.getElementById("loginBtn");
       const registerBtn = document.getElementById("registerBtn");
+      const authForm = document.getElementById("authForm");
+      const loggedInControls = document.getElementById("loggedInControls");
+      const loggedInUsername = document.getElementById("loggedInUsername");
+      const logoutBtn = document.getElementById("logoutBtn");
       const weekSelect = document.getElementById("weekSelect");
       const prevWeekBtn = document.getElementById("prevWeekBtn");
       const nextWeekBtn = document.getElementById("nextWeekBtn");
@@ -216,6 +226,21 @@
       function clearAuth() {
         auth = null;
         localStorage.removeItem(AUTH_KEY);
+      }
+
+      function resetLoggedOutState(message) {
+        clearAuth();
+        workbooks = [];
+        currentWeek = currentDateWeekLabel();
+        setMessage(message || "Log in to load local data.");
+        render();
+      }
+
+      function renderAuthControls() {
+        const isLoggedIn = Boolean(auth?.token && auth?.record?.username);
+        authForm.hidden = isLoggedIn;
+        loggedInControls.hidden = !isLoggedIn;
+        loggedInUsername.textContent = auth?.record?.username || "";
       }
 
       function downloadTextFile(filename, content) {
@@ -731,6 +756,7 @@
       }
 
       function render() {
+        renderAuthControls();
         syncWeekSelect();
         tablesRoot.innerHTML = "";
 
@@ -845,9 +871,7 @@
         const response = await api("/api/workbooks");
         const result = await response.json();
         if (response.status === 401) {
-          clearAuth();
-          setMessage("Session expired. Log in again.");
-          render();
+          resetLoggedOutState("Session expired. Log in again.");
           return;
         }
         if (!response.ok) {
@@ -888,7 +912,7 @@
         const result = await response.json();
 
         if (response.status === 401) {
-          clearAuth();
+          resetLoggedOutState("Session expired. Log in again.");
           throw new Error("Session expired. Log in again.");
         }
 
@@ -952,6 +976,10 @@
 
       registerBtn.addEventListener("click", () => {
         register().catch((error) => setMessage(error.message));
+      });
+
+      logoutBtn.addEventListener("click", () => {
+        resetLoggedOutState("Logged out.");
       });
 
       weekSelect.addEventListener("change", () => {
